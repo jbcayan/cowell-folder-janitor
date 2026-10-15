@@ -5,7 +5,7 @@ from googleapiclient.discovery import build
 SCOPES = ['https://www.googleapis.com/auth/drive']
 SERVICE_ACCOUNT_FILE = 'service-credentials.json'
 # The ID for "Me and My" folder
-FOLDER_ID_TO_DELETE = '1cLphf_Li0f3fiJaaKAqmiChoT4QRqzM6'
+FOLDER_ID_TO_DELETE = '1S0EX9tnYggKJ5_-fDt4IXVLnNJyam3TJ'
 
 def delete_folder():
     try:

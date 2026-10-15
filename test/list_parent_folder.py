@@ -5,7 +5,7 @@ from googleapiclient.discovery import build
 
 SCOPES = ['https://www.googleapis.com/auth/drive']
 SERVICE_ACCOUNT_FILE = 'service-credentials.json'
-PARENT_FOLDER_ID = '1IGVqByX0Nr_skGrV2NqxzxwTqv6Sc4uW'
+PARENT_FOLDER_ID = '1S0EX9tnYggKJ5_-fDt4IXVLnNJyam3TJ'
 
 def format_date(date_str):
     # Google API returns date in RFC 3339 format (e.g., 2023-10-13T10:00:00.000Z)

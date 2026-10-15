@@ -1,6 +1,6 @@
 # 🚀 Google Drive Auto-Deletion Deployment Guide
 
-This guide explains how to deploy the "Janitor" Lambda function to automatically **move to Trash** folders older than a configurable threshold (default: 24 hours) from your Google Drive "Co Test" folder.
+This guide explains how to deploy the "Janitor" Lambda function to automatically **move to Trash** folders older than a configurable threshold (default: 24 hours) from your Google Drive parent folder.
 
 ## Architecture Overview
 
@@ -11,8 +11,8 @@ EventBridge (5 min) → Lambda (Python 3.12, arm64) → Google Drive API (trashe
 ## 1. Google Drive Setup
 
 Before deploying, ensure your service account has the correct access:
-*   **Service Account Email:** `test-co@test-co-511505.iam.gserviceaccount.com`
-*   **Permission:** The service account must have **Editor** access to the parent folder ("Co Test").
+*   **Service Account Email:** `cowell-ocr-drive-exporter@sports-academy-alamin-393006.iam.gserviceaccount.com` (or your service account)
+*   **Permission:** The service account must have **Editor** access to the parent folder.
 
 **Why Editor (not Owner)?** The function uses `trashed=true` which works with Editor permissions. This allows the service account to trash folders it doesn't own (created by users). Trashed items are auto-purged by Google after 30 days.
 
@@ -28,7 +28,7 @@ Before deploying, ensure your service account has the correct access:
 4.  **Function name:** `cowell-folder-janitor`
 5.  **Runtime:** Select **Python 3.12**.
 6.  **Architecture:** Select **arm64** (cheaper, faster; matches our build).
-7.  Click **Create function**.
+6.  Click **Create function**.
 
 ### B. Environment Variables
 
@@ -37,8 +37,11 @@ Go to **Configuration** tab → **Environment variables** → **Edit** → **Add
 | Key | Value | Description |
 | :--- | :--- | :--- |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | Full JSON from `service-credentials.json` | Copy **entire content** as a single line string. |
-| `PARENT_FOLDER_ID` | `1IGVqByX0Nr_skGrV2NqxzxwTqv6Sc4uW` | The ID of the "Co Test" folder. |
-| `EXPIRATION_HOURS` | `24` | Hours before a folder is trashed. |
+| `PARENT_FOLDER_ID` | `1S0EX9tnYggKJ5_-fDt4IXVLnNJyam3TJ` | The ID of the parent folder ("JBC-COWELL"). |
+| `EXPIRATION_MINUTES` | `60` | **Primary:** Minutes before a folder is trashed (e.g., `60` = 1 hour, `5` = 5 min). |
+| `EXPIRATION_HOURS` | `1` | **Fallback (legacy):** Hours before a folder is trashed. Used only if `EXPIRATION_MINUTES` not set. |
+
+**Priority:** `EXPIRATION_MINUTES` → `EXPIRATION_HOURS` → default (24 hours)
 
 ### C. Build & Upload Deployment Package (No Layer Needed)
 
@@ -63,14 +66,18 @@ docker run --rm --entrypoint "" -v "$(pwd):/var/task" public.ecr.aws/lambda/pyth
   cp lambda_handler.py /var/task/ && \
   chmod -R 755 /var/task"
 
-# 3. Zip the package
-cd /var/task && zip -r ../deployment_package.zip . -q
+# 3. Copy the built handler back and zip from host (not inside container!)
+cd /Users/fazlulayankoushik/Documents/Projects/JB\ CONNECT/COWELL\ PROJECT
+cp Cowel-auto-file-deletion/lambda_handler.py lambda_package/lambda_handler.py
+cd lambda_package && zip -r -q ../deployment_package.zip .
 
 # 4. Upload deployment_package.zip to Lambda
 #    Code tab → Upload from → .zip file → Select deployment_package.zip
 ```
 
-**Alternative (if you have Linux/ARM machine):**
+**Note:** The `zip` command runs on your **host machine** (Mac/Linux), not inside the Docker container. The Docker step only installs the Linux/ARM binaries into `lambda_package/`.
+
+**Alternative (if you have a Linux/ARM machine natively):**
 ```bash
 pip3 install -t lambda_package/ -r requirements.txt
 cp lambda_handler.py lambda_package/
@@ -97,6 +104,15 @@ To make the Lambda run every 5 minutes:
 5.  **Permissions:** Allow EventBridge to invoke your Lambda function (creates resource-based policy automatically).
 6.  **Create schedule**.
 
+**Other schedule options:**
+| Frequency | Expression |
+|-----------|------------|
+| Every 5 minutes | `rate(5 minutes)` |
+| Every 15 minutes | `rate(15 minutes)` |
+| Every 1 hour | `rate(1 hour)` |
+| Every 6 hours | `rate(6 hours)` |
+| Daily at midnight UTC | `cron(0 0 * * ? *)` |
+
 ---
 
 ## 4. Testing Strategy
@@ -108,29 +124,33 @@ To make the Lambda run every 5 minutes:
 python3 test/test_local_cleanup.py
 ```
 - Lists all folders with age and status (SAFE/EXPIRED)
-- Asks for `DELETE` confirmation before trashing
-- Uses same logic as Lambda
+- Asks for `YES` confirmation before trashing
+- Uses same logic as Lambda (supports minutes)
 
-### B. Lambda Test Mode
+### B. Lambda Test Mode (Quick Test)
 
-1.  In Lambda console, set `EXPIRATION_HOURS` = `0` (trashes everything).
+1.  In Lambda console, set `EXPIRATION_MINUTES` = `5` (trashes folders older than 5 min).
 2.  Create a test event (empty JSON `{}`).
 3.  Click **Test**.
-4.  Check Google Drive → Trash for moved folders.
-5.  **Reset** `EXPIRATION_HOURS` to `24`.
+4.  Check Google Drive → **Trash** for moved folders.
+5.  **Reset** `EXPIRATION_MINUTES` to `60` (or your production value).
 
 ### C. Verify Logs
 
 Check **Monitor** → **View CloudWatch logs** for:
 ```
-Total folders in parent: 3
-Found: Me117 | Created: 2026-10-13T06:01:59.008Z | ID: ...
-Found: Me and My | Created: 2026-10-13T06:01:46.923Z | ID: ...
-Current UTC: 2026-10-13T09:58:34Z
-Cutoff time: 2026-10-13T08:58:34Z
-Found 2 expired folders. Starting trashing...
-Successfully trashed: Me117 (ID: ...)
-Successfully trashed: Me and My (ID: ...)
+Starting Google Drive Janitor cleanup...
+EXPIRATION_DELTA = 0:05:00
+PARENT_FOLDER_ID = 1S0EX9tnYggKJ5_-fDt4IXVLnNJyam3TJ
+Total folders in parent: 5
+  Found: Testing2200 | Created: 2026-10-15T10:24:50.000Z | ID: 10UNuWrPGwbDKrPnzlugnmQ-QEUN7T9pi
+  Found: Testing2200 | Created: 2026-10-15T10:18:11.000Z | ID: 1sLuTtRUYJinDy7tf_snA1rrbEP6RT7Hj
+  ...
+Current UTC: 2026-10-15T10:35:00Z
+Cutoff time: 2026-10-15T10:30:00Z
+Found 3 expired folders. Starting trashing...
+Successfully trashed: Testing2200 (ID: 10UNuWrPGwbDKrPnzlugnmQ-QEUN7T9pi)
+Successfully trashed: Testing2200 (ID: 1sLuTtRUYJinDy7tf_snA1rrbEP6RT7Hj)
 Cleanup complete. Total folders trashed: 2
 ```
 
@@ -145,6 +165,7 @@ Cleanup complete. Total folders trashed: 2
 | `No module named '_cffi_backend'` | Rebuild package with `google-auth<2.30` (uses pure Python `rsa`). |
 | `Request timed out` | Increase Lambda timeout to 60s, memory to 256 MB. |
 | `Unable to import module` | Ensure architecture is **arm64** and zip contains `lambda_handler.py` at root. |
+| `cp: same file` error | Ignore — it means the handler was already copied. |
 
 ---
 
@@ -167,5 +188,26 @@ Cleanup complete. Total folders trashed: 2
 | Timeout | 60 seconds |
 | Memory | 256 MB |
 | Trigger | EventBridge `rate(5 minutes)` |
-| Retention | 24 hours (configurable) |
+| Retention | Configurable via `EXPIRATION_MINUTES` (default 24h) |
 | Action | Move to Trash (`trashed=true`) |
+
+---
+
+## 8. Project Structure
+
+```
+Cowel-auto-file-deletion/
+├── lambda_handler.py          # Main Lambda function (supports minutes + hours)
+├── requirements.txt           # Python dependencies
+├── DEPLOYMENT_GUIDE.md        # This file
+├── .gitignore                 # Git ignore rules
+├── README.md                  # Project overview
+├── deployment_package.zip     # Built deployment artifact (~21 MB)
+├── lambda_package/            # Docker build output (dependencies + handler)
+└── test/                      # Local testing utilities
+    ├── test_local_cleanup.py  # Interactive cleanup test (minutes)
+    ├── list_parent_folder.py  # List all folders with creation times
+    ├── create_testing2200.py  # Create test folders
+    ├── trash_folders.py       # Trash folders by ID (interactive or args)
+    └── check_*.py             # Diagnostic scripts
+```

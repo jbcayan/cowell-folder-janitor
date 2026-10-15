@@ -5,7 +5,8 @@ from googleapiclient.discovery import build
 
 CREDS_PATH = 'service-credentials.json'
 SCOPES = ['https://www.googleapis.com/auth/drive']
-PARENT_FOLDER_ID = '1IGVqByX0Nr_skGrV2NqxzxwTqv6Sc4uW'
+# PARENT_FOLDER_ID = '1IGVqByX0Nr_skGrV2NqxzxwTqv6Sc4uW'
+PARENT_FOLDER_ID = '1S0EX9tnYggKJ5_-fDt4IXVLnNJyam3TJ'
 FOLDER_NAME = 'Testing2200'
 
 def main():
