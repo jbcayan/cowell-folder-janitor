@@ -47,14 +47,21 @@ Go to **Configuration** tab → **Environment variables** → **Edit** → **Add
 
 We build a self-contained zip with all dependencies. **No Lambda Layer required.**
 
+**⚠️ Important:** Build in a dedicated `lambda_package/` directory to avoid polluting the project root with pip packages.
+
 **On your local machine (requires Docker):**
 
 ```bash
 # 1. Navigate to project root
-cd Cowel-auto-file-deletion
+cd /Users/fazlulayankoushik/Documents/Projects/JB\ CONNECT/COWELL\ PROJECT
 
-# 2. Build package using Docker (gets Linux/ARM binaries)
-docker run --rm --entrypoint "" -v "$(pwd):/var/task" public.ecr.aws/lambda/python:3.12 \
+# 2. Create/clean build directory
+rm -rf lambda_package && mkdir lambda_package
+
+# 3. Build package using Docker (installs Linux/ARM binaries into lambda_package/)
+docker run --rm --entrypoint "" \
+  -v "$(pwd)/lambda_package:/var/task" \
+  public.ecr.aws/lambda/python:3.12 \
   bash -c "pip install --no-cache-dir \
     'google-auth<2.30' \
     google-api-python-client \
@@ -63,19 +70,22 @@ docker run --rm --entrypoint "" -v "$(pwd):/var/task" public.ecr.aws/lambda/pyth
     pyasn1 \
     pyasn1-modules \
     -t /var/task/ && \
-  cp lambda_handler.py /var/task/ && \
   chmod -R 755 /var/task"
 
-# 3. Copy the built handler back and zip from host (not inside container!)
-cd /Users/fazlulayankoushik/Documents/Projects/JB\ CONNECT/COWELL\ PROJECT
+# 4. Copy handler into build directory
 cp Cowel-auto-file-deletion/lambda_handler.py lambda_package/lambda_handler.py
+
+# 5. Zip from host (not inside container!)
 cd lambda_package && zip -r -q ../deployment_package.zip .
 
-# 4. Upload deployment_package.zip to Lambda
+# 6. Upload deployment_package.zip to Lambda
 #    Code tab → Upload from → .zip file → Select deployment_package.zip
 ```
 
-**Note:** The `zip` command runs on your **host machine** (Mac/Linux), not inside the Docker container. The Docker step only installs the Linux/ARM binaries into `lambda_package/`.
+**Why this works:**
+- Docker mounts `lambda_package/` → `/var/task` (not the project root)
+- pip installs dependencies into `lambda_package/` only
+- Project root stays clean; `deployment_package.zip` is created at project root
 
 **Alternative (if you have a Linux/ARM machine natively):**
 ```bash
