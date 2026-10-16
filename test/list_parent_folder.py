@@ -1,59 +1,54 @@
-import os
+import sys
 from datetime import datetime
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
+from drive_config import get_service, PARENT_FOLDER_ID
 
-SCOPES = ['https://www.googleapis.com/auth/drive']
-SERVICE_ACCOUNT_FILE = 'service-credentials.json'
-PARENT_FOLDER_ID = '1S0EX9tnYggKJ5_-fDt4IXVLnNJyam3TJ'
 
 def format_date(date_str):
-    # Google API returns date in RFC 3339 format (e.g., 2023-10-13T10:00:00.000Z)
-    try:
-        dt = datetime.strptime(date_str, '%Y-%m-%dT%H:%M:%S.%fZ')
-        return dt.strftime('%Y-%m-%d %H:%M:%S')
-    except ValueError:
+    for fmt in ('%Y-%m-%dT%H:%M:%S.%fZ', '%Y-%m-%dT%H:%M:%SZ'):
         try:
-            dt = datetime.strptime(date_str, '%Y-%m-%dT%H:%M:%SZ')
-            return dt.strftime('%Y-%m-%d %H:%M:%S')
-        except:
-            return date_str
+            return datetime.strptime(date_str, fmt).strftime('%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            continue
+    return date_str
+
 
 def list_parent_contents():
     try:
-        creds = service_account.Credentials.from_service_account_file(
-            SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-        service = build('drive', 'v3', credentials=creds)
+        service = get_service()
 
-        print(f"Listing all contents in the Parent folder (Co Test - {PARENT_FOLDER_ID}):")
-        
-        # Updated fields to include createdTime
+        print(f"Listing all contents in the Parent folder (ID: {PARENT_FOLDER_ID}):")
+
         query = f"'{PARENT_FOLDER_ID}' in parents and trashed = false"
-        results = service.files().list(q=query, fields="files(id, name, mimeType, createdTime)").execute()
+        results = service.files().list(
+            q=query,
+            fields='files(id, name, mimeType, createdTime)',
+        ).execute()
         items = results.get('files', [])
 
         if not items:
             print("No files or folders found in the parent directory.")
-        else:
-            folders = [i for i in items if i['mimeType'] == 'application/vnd.google-apps.folder']
-            files = [i for i in items if i['mimeType'] != 'application/vnd.google-apps.folder']
+            return
 
-            print("\n📂 Directories:")
-            if not folders:
-                print("  None")
-            for folder in folders:
-                created = format_date(folder.get('createdTime', 'Unknown'))
-                print(f"  - {folder['name']} (ID: {folder['id']}) | Created: {created}")
+        folders = [i for i in items if i['mimeType'] == 'application/vnd.google-apps.folder']
+        files = [i for i in items if i['mimeType'] != 'application/vnd.google-apps.folder']
 
-            print("\n📄 Files:")
-            if not files:
-                print("  None")
-            for file in files:
-                created = format_date(file.get('createdTime', 'Unknown'))
-                print(f"  - {file['name']} (ID: {file['id']}) | Created: {created}")
+        print("\n📂 Directories:")
+        if not folders:
+            print("  None")
+        for folder in folders:
+            created = format_date(folder.get('createdTime', 'Unknown'))
+            print(f"  - {folder['name']} (ID: {folder['id']}) | Created: {created}")
+
+        print("\n📄 Files:")
+        if not files:
+            print("  None")
+        for file in files:
+            created = format_date(file.get('createdTime', 'Unknown'))
+            print(f"  - {file['name']} (ID: {file['id']}) | Created: {created}")
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"An error occurred: {e}", file=sys.stderr)
+
 
 if __name__ == '__main__':
     list_parent_contents()
