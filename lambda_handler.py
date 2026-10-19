@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 import google.auth.transport.requests
+from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -32,23 +33,26 @@ else:
 
 
 # ---------------------------------------------------------------------------
-# Auth — OAuth2 refresh token flow
+# Auth
 #
-# Flow (explicit, upfront before any Drive call):
-#   POST https://oauth2.googleapis.com/token
-#     grant_type    = refresh_token
-#     client_id     = GOOGLE_DRIVE_CLIENT_ID
-#     client_secret = GOOGLE_DRIVE_CLIENT_SECRET
-#     refresh_token = GOOGLE_DRIVE_REFRESH_TOKEN
-#   → access_token received → used as Authorization: Bearer on every request
+# Two credential strategies, mirroring the local test scripts:
+#
+#   get_oauth_service()  — OAuth2 refresh token flow (primary)
+#     POST https://oauth2.googleapis.com/token
+#       grant_type    = refresh_token
+#       client_id     = GOOGLE_DRIVE_CLIENT_ID
+#       client_secret = GOOGLE_DRIVE_CLIENT_SECRET
+#       refresh_token = GOOGLE_DRIVE_REFRESH_TOKEN
+#     → access_token → Authorization: Bearer on every request
+#     Owns folders created by the real Google user → can trash them.
+#
+#   get_sa_service()  — service account (fallback)
+#     Owns folders it created itself → can trash those.
+#
+# The trashing logic tries OAuth2 first; if it gets a 403 it retries with
+# the service account.  This covers both ownership cases automatically.
 # ---------------------------------------------------------------------------
-def get_drive_service():
-    """Return an authenticated Drive v3 client using OAuth2 user credentials.
-
-    OAuth2 is required (instead of a service account) because the janitor
-    must be able to trash folders owned by the real Google user.  Service
-    accounts have no Drive storage quota and receive 403 on those operations.
-    """
+def get_oauth_service():
     client_id     = os.environ.get('GOOGLE_DRIVE_CLIENT_ID', '')
     client_secret = os.environ.get('GOOGLE_DRIVE_CLIENT_SECRET', '')
     refresh_token = os.environ.get('GOOGLE_DRIVE_REFRESH_TOKEN', '')
@@ -67,19 +71,32 @@ def get_drive_service():
         token_uri='https://oauth2.googleapis.com/token',
         scopes=['https://www.googleapis.com/auth/drive'],
     )
-
-    # Exchange refresh token → access token RIGHT NOW, before any Drive call
     credentials.refresh(google.auth.transport.requests.Request())
     logger.info(f"OAuth2 token refreshed (expires: {credentials.expiry} UTC)")
-
     return build('drive', 'v3', credentials=credentials)
+
+
+def get_sa_service():
+    sa_json = os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON', '')
+    if not sa_json:
+        raise ValueError("GOOGLE_SERVICE_ACCOUNT_JSON env var is missing or empty.")
+
+    sa_info = json.loads(sa_json)
+    creds = service_account.Credentials.from_service_account_info(
+        sa_info, scopes=['https://www.googleapis.com/auth/drive']
+    )
+    return build('drive', 'v3', credentials=creds)
 
 
 # ---------------------------------------------------------------------------
 # Lambda handler
 # ---------------------------------------------------------------------------
 def lambda_handler(event, context):
-    """Trash folders in PARENT_FOLDER_ID that are older than EXPIRATION_DELTA."""
+    """Trash expired folders in PARENT_FOLDER_ID.
+
+    Tries OAuth2 (real user) first; falls back to the service account for
+    folders the service account created itself.
+    """
     logger.info("Starting Google Drive Janitor cleanup...")
 
     if not PARENT_FOLDER_ID:
@@ -87,13 +104,14 @@ def lambda_handler(event, context):
         return {'statusCode': 500, 'body': json.dumps('PARENT_FOLDER_ID not set.')}
 
     try:
-        service = get_drive_service()
+        oauth_service = get_oauth_service()
+        sa_service    = get_sa_service()
 
         logger.info(f"PARENT_FOLDER_ID = {PARENT_FOLDER_ID}")
         logger.info(f"EXPIRATION_DELTA = {EXPIRATION_DELTA}")
 
         # List ALL non-trashed folders in the parent (for debug visibility)
-        all_results = service.files().list(
+        all_results = oauth_service.files().list(
             q=(
                 f"'{PARENT_FOLDER_ID}' in parents"
                 f" and mimeType = 'application/vnd.google-apps.folder'"
@@ -115,7 +133,7 @@ def lambda_handler(event, context):
         logger.info(f"Cutoff time : {cutoff_str}")
 
         # Fetch only the expired folders
-        expired_results = service.files().list(
+        expired_results = oauth_service.files().list(
             q=(
                 f"'{PARENT_FOLDER_ID}' in parents"
                 f" and mimeType = 'application/vnd.google-apps.folder'"
@@ -140,14 +158,35 @@ def lambda_handler(event, context):
             folder_name = item['name']
             created_at  = item['createdTime']
             try:
-                service.files().update(
+                # Primary: OAuth2 (owns user-created folders)
+                oauth_service.files().update(
                     fileId=folder_id,
                     body={'trashed': True},
                 ).execute()
                 logger.info(f"Trashed: {folder_name} (ID: {folder_id}, Created: {created_at})")
                 trashed_count += 1
+
             except HttpError as e:
-                logger.error(f"Failed to trash {folder_name} ({folder_id}): {e}")
+                if e.resp.status != 403:
+                    logger.error(f"Failed to trash {folder_name} ({folder_id}): {e}")
+                    continue
+
+                # Fallback: service account (owns folders it created itself)
+                logger.warning(
+                    f"OAuth2 denied for {folder_name} ({folder_id}) — retrying with service account..."
+                )
+                try:
+                    sa_service.files().update(
+                        fileId=folder_id,
+                        body={'trashed': True},
+                    ).execute()
+                    logger.info(f"Trashed [SA]: {folder_name} (ID: {folder_id}, Created: {created_at})")
+                    trashed_count += 1
+                except HttpError as e2:
+                    logger.error(f"SA also failed for {folder_name} ({folder_id}): {e2}")
+                except Exception as e2:
+                    logger.error(f"SA unexpected error for {folder_name}: {e2}")
+
             except Exception as e:
                 logger.error(f"Unexpected error trashing {folder_name}: {e}")
 

@@ -30,7 +30,7 @@ from drive_config import PARENT_FOLDER_ID, get_oauth_services
 _HERE = os.path.dirname(os.path.abspath(__file__))
 SAMPLE_DIR = os.path.normpath(os.path.join(_HERE, '..', 'sample-export'))
 
-IMAGE_FILE = os.path.join(SAMPLE_DIR, '86_n.jpg')
+IMAGE_FILE = os.path.join(SAMPLE_DIR, '86_n.png')
 JSON_FILE = os.path.join(SAMPLE_DIR, 'test.json')
 
 EXPORT_FOLDER_NAME = 'sample-export'

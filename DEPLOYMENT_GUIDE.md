@@ -39,11 +39,12 @@ Go to **Configuration** tab → **Environment variables** → **Edit** → **Add
 | `GOOGLE_DRIVE_CLIENT_ID` | OAuth2 client ID | From `service-credentials.json` → `GOOGLE_DRIVE_CLIENT_ID`. |
 | `GOOGLE_DRIVE_CLIENT_SECRET` | OAuth2 client secret | From `service-credentials.json` → `GOOGLE_DRIVE_CLIENT_SECRET`. |
 | `GOOGLE_DRIVE_REFRESH_TOKEN` | OAuth2 refresh token | From `service-credentials.json` → `GOOGLE_DRIVE_REFRESH_TOKEN`. |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Full JSON from `service-credentials.json` | Used as a **fallback** for trashing folders created directly by the service account. |
 | `PARENT_FOLDER_ID` | `1S0EX9tnYggKJ5_-fDt4IXVLnNJyam3TJ` | The ID of the parent folder ("JBC-COWELL"). |
 | `EXPIRATION_MINUTES` | `60` | **Primary:** Minutes before a folder is trashed (e.g., `60` = 1 hour, `5` = 5 min). |
 | `EXPIRATION_HOURS` | `1` | **Fallback (legacy):** Hours before a folder is trashed. Used only if `EXPIRATION_MINUTES` not set. |
 
-**Auth flow:** On every Lambda invocation, the handler exchanges the refresh token for an access token (`POST https://oauth2.googleapis.com/token` with `grant_type=refresh_token`) before making any Drive API calls.
+**Auth flow:** On every Lambda invocation, the handler initializes both **OAuth2** (primary, for user-owned items) and the **Service Account** (fallback, for service-account-owned items) so trashing never fails due to ownership mismatches.
 
 **Priority:** `EXPIRATION_MINUTES` → `EXPIRATION_HOURS` → default (24 hours)
 
